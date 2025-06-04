@@ -9,28 +9,27 @@ from datetime import timedelta
 import traceback
 
 # --- Configuration ---
-APP_DIR = os.path.dirname(os.path.abspath(__file__)) # This will be the root of the cloned repo on Streamlit Cloud
+APP_DIR = os.path.dirname(os.path.abspath(__file__)) # Root of the cloned repo on Streamlit Cloud
 
-# 1. Feature Data from Raw GitHub URL
-#    Make sure this URL is correct and the file is publicly accessible.
-FULL_FEATURE_PATH_APP = "https://raw.githubusercontent.com/pefura/Climate-fintech/main/feature_engineered_ZW_F_target_climate_financial.csv" # Encapsulate in quotes
+# 1. Feature Data from the root of the GitHub repository
+#    The file is directly in APP_DIR.
+FEATURE_FILE_NAME_ONLY = "feature_engineered_ZW_F_target_climate_financial.csv"
+FULL_FEATURE_PATH_APP = os.path.join(APP_DIR, FEATURE_FILE_NAME_ONLY)
 
-# 2. Model Files Location
-
+# 2. Model Files are also at the root of the GitHub repository
 FULL_MODEL_DIR_PATH_APP = APP_DIR # Models are in the same directory as wheat_app.py
 
-
 # Optional: Print resolved paths to terminal when Streamlit starts, for verification
-# These prints are more useful for local debugging. On Streamlit Cloud, check deployment logs.
 print(f"--- Path Configuration (app.py) ---")
-print(f"app.py directory (APP_DIR): {APP_DIR}") # On Streamlit Cloud, this will be something like /mount/src/climate-fintech
-print(f"Full feature path (URL): {FULL_FEATURE_PATH_APP}")
+print(f"app.py directory / Repo root (APP_DIR): {APP_DIR}")
+print(f"Full feature path (resolved): {os.path.abspath(FULL_FEATURE_PATH_APP)}")
 print(f"Full model directory path (resolved): {os.path.abspath(FULL_MODEL_DIR_PATH_APP)}")
 print(f"--- End Path Configuration ---")
 
 TARGET_RETURN_COL = 'Target_Return'
 RAW_PRICE_COL_NAME_IN_ORIGINAL_FILE = 'ZW=F'
 HORIZONS_AVAILABLE = [1, 2, 3, 4, 5, 6]
+
 
 # --- Helper Functions ---
 @st.cache_data
