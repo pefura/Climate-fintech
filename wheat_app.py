@@ -9,16 +9,24 @@ from datetime import timedelta
 import traceback
 
 # --- Configuration ---
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-BASE_PROJECT_PATH = os.path.dirname(APP_DIR)
+APP_DIR = os.path.dirname(os.path.abspath(__file__)) # This will be the root of the cloned repo on Streamlit Cloud
 
-PATH_PREFIX_FOR_FEATURES = "/Users/pefura-yone/Documents/WQU/capstone/"
-FEATURE_FILE_DIR_NAME = "feature_engineered_data"
-FEATURE_FILE_NAME = "feature_engineered_ZW_F_target_climate_financial.csv"
-FULL_FEATURE_PATH_APP = os.path.join(PATH_PREFIX_FOR_FEATURES, FEATURE_FILE_DIR_NAME, FEATURE_FILE_NAME)
+# 1. Feature Data from Raw GitHub URL
+#    Make sure this URL is correct and the file is publicly accessible.
+FULL_FEATURE_PATH_APP = "https://raw.githubusercontent.com/pefura/Climate-fintech/main/feature_engineered_ZW_F_target_climate_financial.csv" # Encapsulate in quotes
 
-MODEL_DIR_NAME = "trained_models_for_streamlit"
-FULL_MODEL_DIR_PATH_APP = os.path.join(BASE_PROJECT_PATH, MODEL_DIR_NAME)
+# 2. Model Files Location
+
+FULL_MODEL_DIR_PATH_APP = APP_DIR # Models are in the same directory as wheat_app.py
+
+
+# Optional: Print resolved paths to terminal when Streamlit starts, for verification
+# These prints are more useful for local debugging. On Streamlit Cloud, check deployment logs.
+print(f"--- Path Configuration (app.py) ---")
+print(f"app.py directory (APP_DIR): {APP_DIR}") # On Streamlit Cloud, this will be something like /mount/src/climate-fintech
+print(f"Full feature path (URL): {FULL_FEATURE_PATH_APP}")
+print(f"Full model directory path (resolved): {os.path.abspath(FULL_MODEL_DIR_PATH_APP)}")
+print(f"--- End Path Configuration ---")
 
 TARGET_RETURN_COL = 'Target_Return'
 RAW_PRICE_COL_NAME_IN_ORIGINAL_FILE = 'ZW=F'
@@ -26,35 +34,43 @@ HORIZONS_AVAILABLE = [1, 2, 3, 4, 5, 6]
 
 # --- Helper Functions ---
 @st.cache_data
-def load_feature_data(file_path):
-    absolute_file_path = os.path.abspath(file_path)
-    if not os.path.exists(absolute_file_path):
-        st.error(f"CRITICAL ERROR: Feature data file NOT FOUND at resolved path: {absolute_file_path}")
-        return None
+def load_feature_data(file_path_or_url): # Renamed to reflect it can be a URL
+    # No need for os.path.abspath or os.path.exists if it's a URL
     try:
-        df = pd.read_csv(absolute_file_path, index_col='Date', parse_dates=['Date'])
+        # Pandas can read directly from a URL
+        df = pd.read_csv(file_path_or_url, index_col='Date', parse_dates=['Date'])
         df.sort_index(inplace=True)
+        # st.success(f"Feature data loaded successfully from {file_path_or_url}") # Optional success message
         return df
     except Exception as e:
-        st.error(f"An error occurred during data loading from {absolute_file_path}: {e}")
+        st.error(f"An error occurred during data loading from {file_path_or_url}: {e}")
         st.text(traceback.format_exc()); return None
 
 @st.cache_resource
 def load_model_components(horizon_weeks):
+    # FULL_MODEL_DIR_PATH_APP is now APP_DIR (root of the repo)
     model_filename = os.path.join(FULL_MODEL_DIR_PATH_APP, f"strategy_b_model_h{horizon_weeks}.joblib")
-    absolute_model_path = os.path.abspath(model_filename)
-    file_exists = os.path.exists(absolute_model_path)
-    if file_exists:
+    # For Streamlit Cloud, os.path.abspath might give paths like /mount/src/climate-fintech/strategy_b_model_h1.joblib
+    # absolute_model_path = os.path.abspath(model_filename) # Good for debugging locally
+
+    # On Streamlit Cloud, relative paths from the script's location are usually fine.
+    # If APP_DIR is the root, then model_filename is already effectively correct.
+    
+    # Let's keep abspath for local debugging print, but primarily rely on model_filename
+    # st.info(f"Attempting to load model: {os.path.abspath(model_filename)}")
+
+    if os.path.exists(model_filename): # This check will work on Streamlit Cloud too
         try:
-            components = joblib.load(absolute_model_path)
+            components = joblib.load(model_filename)
             return components
         except Exception as e:
-            st.error(f"Error loading model components for H{horizon_weeks} from {absolute_model_path}: {e}")
+            st.error(f"Error loading model components for H{horizon_weeks} from {model_filename}: {e}")
             st.text(traceback.format_exc()); return None
     else:
-        st.error(f"Model file NOT FOUND for Horizon {horizon_weeks} at resolved path: {absolute_model_path}")
+        st.error(f"Model file NOT FOUND for Horizon {horizon_weeks} at expected path: {model_filename} (resolved to {os.path.abspath(model_filename)})")
         return None
 
+# ... (rest of your get_latest_features_for_prediction, make_prediction, get_individual_trading_advice, plot_future_predictions_overview functions remain THE SAME as your last working version) ...
 def get_latest_features_for_prediction(df_full_data, all_train_feature_names_from_model):
     if df_full_data is None or df_full_data.empty: return None, None
     cols_to_drop_for_X = [TARGET_RETURN_COL] + [f'Target_Direction_h{h}' for h in HORIZONS_AVAILABLE]
@@ -90,43 +106,33 @@ def make_prediction(latest_features_df, components):
         return int(pred_direction), pred_proba[1]
     except Exception: return None, None
 
-# --- MODIFIED get_individual_trading_advice (Option 1) ---
 def get_individual_trading_advice(direction, probability_up, horizon_weeks, prediction_date):
     if direction is None or probability_up is None:
-        # Using a slightly more prominent header for the week itself
         return f"##### Week starting {prediction_date.strftime('%Y-%m-%d')} (H{horizon_weeks})\n*Prediction could not be made.*"
-
     advice_lines = []
     advice_lines.append(f"##### Week starting {prediction_date.strftime('%Y-%m-%d')} (Horizon: {horizon_weeks} Week{'s' if horizon_weeks > 1 else ''} Ahead)")
-
     action_color = "green" if direction == 1 else "red"
     action_text = "UP (Consider LONG)" if direction == 1 else "DOWN (Consider SHORT or AVOID)"
-    # Using HTML for color, so need unsafe_allow_html=True when calling st.markdown
     advice_lines.append(f"- **Prediction:** <span style='color:{action_color}; font-weight:bold;'>{action_text}</span>")
     advice_lines.append(f"- **Probability of UP:** {probability_up:.2%}")
-
     confidence_level_text = ""
     if direction == 1: # UP
         if probability_up > 0.70: confidence_level_text = "**High**"
         elif probability_up > 0.55: confidence_level_text = "**Moderate**"
         else: confidence_level_text = "Low"
     else: # DOWN
-        if probability_up < 0.30: confidence_level_text = "**High**" # High confidence in DOWN
+        if probability_up < 0.30: confidence_level_text = "**High**"
         elif probability_up < 0.45: confidence_level_text = "**Moderate**"
         else: confidence_level_text = "Low"
     advice_lines.append(f"- **Confidence in Prediction:** {confidence_level_text}")
-
     signal_summary = ""
     if "High" in confidence_level_text:
         signal_summary = f"Strong signal for {'upward' if direction == 1 else 'downward'} movement."
     elif "Moderate" in confidence_level_text:
         signal_summary = f"Moderate signal for {'upward' if direction == 1 else 'downward'} movement."
-    else: # Low
-        signal_summary = f"Weak signal. Exercise caution or await further confirmation."
+    else: signal_summary = f"Weak signal. Exercise caution or await further confirmation."
     advice_lines.append(f"- **Signal Strength:** *{signal_summary}*")
-    
     return "\n".join(advice_lines)
-# --- END MODIFICATION ---
 
 def plot_future_predictions_overview(df_forecasts, plot_title_suffix=""):
     if df_forecasts.empty:
@@ -166,20 +172,15 @@ def plot_future_predictions_overview(df_forecasts, plot_title_suffix=""):
     prob_threshold_line = ax_prob.axhline(0.5, color='dimgray', linestyle=':', linewidth=1, label='Prob Threshold (0.5)')
     all_legend_handles = direction_legend_elements + lines_prob + [prob_threshold_line]
     ax_prob.legend(handles=all_legend_handles, loc='upper right', bbox_to_anchor=(1.0, 1.0), fontsize='small')
-    
     title = f'Future Predictions Overview {plot_title_suffix}'
-    # Access global start_horizon and end_horizon for title customization
-    # This assumes they are set correctly in main() before this plot function is called for the filtered data
     current_min_h_plot = df_forecasts["Horizon"].min()
     current_max_h_plot = df_forecasts["Horizon"].max()
-
     if len(df_forecasts) == 1:
         title = f'Future Prediction for Week {current_min_h_plot} Ahead {plot_title_suffix}'
-    elif current_min_h_plot != min(HORIZONS_AVAILABLE) or current_max_h_plot != max(HORIZONS_AVAILABLE): # A sub-range is plotted
+    elif current_min_h_plot != min(HORIZONS_AVAILABLE) or current_max_h_plot != max(HORIZONS_AVAILABLE):
          title = f'Future Predictions for Weeks {current_min_h_plot} to {current_max_h_plot} Ahead {plot_title_suffix}'
-    else: # Full default range is plotted
+    else:
          title = f'Future Predictions Overview for Next {len(HORIZONS_AVAILABLE)} Weeks {plot_title_suffix}'
-
     ax_dir.set_title(title, fontsize=12)
     ax_dir.set_xlabel('Start Date of Predicted Week')
     plt.tight_layout(rect=[0, 0.03, 1, 0.95]); return fig
@@ -195,11 +196,9 @@ def main():
         st.error("Halting app execution: Feature data could not be loaded."); st.stop()
 
     st.sidebar.header("Prediction Range Selection")
-    min_h_sidebar, max_h_sidebar = min(HORIZONS_AVAILABLE), max(HORIZONS_AVAILABLE) # Use separate vars for sidebar min/max
+    min_h_sidebar, max_h_sidebar = min(HORIZONS_AVAILABLE), max(HORIZONS_AVAILABLE)
     
-    # These will be used by the plot title logic if needed
-    global start_horizon 
-    global end_horizon
+    global start_horizon, end_horizon # Make accessible for plot title
 
     start_horizon = st.sidebar.number_input(
         f"Start Prediction Horizon (Weeks Ahead, {min_h_sidebar}-{max_h_sidebar}):",
@@ -283,12 +282,14 @@ def main():
                     h_advice,
                     prediction_data_for_h['Prediction_For_Week_Starting']
                 )
-                st.markdown(advice_text, unsafe_allow_html=True) # Allow HTML for color
+                st.markdown(advice_text, unsafe_allow_html=True)
                 if pd.notna(prediction_data_for_h['Model_Test_Accuracy']):
                     st.caption(f"H{h_advice} Model Test Accuracy: {prediction_data_for_h['Model_Test_Accuracy']:.2%}")
                 st.markdown("---")
                 advice_displayed_count += 1
-        if advice_displayed_count == 0:
+        if advice_displayed_count == 0 and not any_model_loaded_successfully :
+             pass
+        elif advice_displayed_count == 0 :
              st.info("No prediction data found within selected range to display advice.")
     else:
         st.info("Select a valid range in sidebar to see detailed advice.")
